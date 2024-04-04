@@ -1,0 +1,345 @@
+module BCD(input[7:0] bin,
+	   output reg [7:0] bcd);
+
+reg [3:0] i;
+always@(bin)
+	begin
+		bcd=0;
+		for(i=0;i<8;i=i+1)
+			begin
+				bcd={bcd[6:0],bin[7-i]};
+				if(i<7&&bcd[3:0]>4)   bcd[3:0]=bcd[3:0]+3;
+				if(i<7&&bcd[7:4]>4)   bcd[7:4]=bcd[7:4]+3;
+				
+			end
+		
+	end
+endmodule
+
+module bram #(parameter WIDTH = 8, parameter ADR_WIDTH=10)
+(
+	input [ADR_WIDTH-1:0]adr_in,
+	input [WIDTH-1:0] data_in,
+	input WE,
+	input clk,
+	input rst,
+	output reg [WIDTH-1:0] data_out
+);
+
+reg[WIDTH-1:0]ram[2**ADR_WIDTH-1:0];
+always @(posedge clk)
+begin
+	if(WE)
+		ram[adr_in]<=data_in;
+	data_out<=ram[adr_in];
+end
+endmodule
+
+module cronometru(input clk,
+		 input rst,
+		 input en,
+		 input [1:0] comanda,
+		 output [6:0] hex_0,
+		output[6:0] hex_1,
+		output [6:0] hex_2,
+		output [6:0] hex_3,
+		output [8:0] led_0
+		);
+wire clk_div;
+wire [7:0]timp_s;
+wire [7:0] timp_m;
+wire [7:0] bcd;
+wire [7:0] bcd1;
+wire [9:0] adresa;
+
+clk_div modul1(.clk(clk),.rst(rst),.en(en),.clk_div(clk_div));
+clk_mng modul2(.clk(clk_div),.rst(rst),.timp_s(timp_s),.timp_m(timp_m),.comanda(comanda),.adr_out(adresa));
+bram #(.WIDTH(9))modul9(.clk(clk_div),.rst(rst),.WE(1),.adr_in(adresa),.data_in({timp_m[0],timp_s}),.data_out(led_0));
+BCD modul3(.bin(timp_s),.bcd(bcd));
+BCD modul4(.bin(timp_m),.bcd(bcd1));
+hex modul5(.in(bcd[3:0]), .hex_0(hex_0));
+hex modul6(.in(bcd[7:4]), .hex_0(hex_1));
+hex modul7(.in(bcd1[3:0]), .hex_0(hex_2));
+hex modul8(.in(bcd1[7:4]), .hex_0(hex_3));
+
+
+endmodule
+
+module hex
+(
+	input [3:0] in,
+	output[6:0] hex_0
+
+);
+
+reg [6:0] hex_reg;
+
+always@(in)
+begin
+	case(in)
+	0: hex_reg=7'b1000000;
+	1: hex_reg=7'b1111001;
+	2: hex_reg=7'b0100100;
+	3: hex_reg=7'b0110000;
+	4: hex_reg=7'b0011001;
+	5: hex_reg=7'b0010010;
+	6: hex_reg=7'b0000010;
+	7: hex_reg=7'b1111000;
+	8: hex_reg=7'b0000000;
+	9: hex_reg=7'b0010000;
+	10: hex_reg=7'b0001000;
+	11: hex_reg=7'b0000011;
+	12: hex_reg=7'b1000110;
+	13: hex_reg=7'b0100001;
+	14: hex_reg=7'b0000110;
+	15: hex_reg=7'b0001110;
+	endcase
+end
+assign hex_0=hex_reg;
+
+endmodule
+
+module  clk_div #(parameter perioada=5000000)
+(
+		input rst,
+		input clk,
+		input en,
+		output clk_div
+);
+
+reg clk_reg;
+reg clk_next;
+reg [24:0]cnt_reg;
+reg [24:0]cnt_next;
+
+
+
+always @(posedge clk or negedge rst)
+begin
+	if(!rst)
+	begin
+		cnt_reg<=0;
+		clk_reg<=0;
+	end
+	else
+	begin
+		cnt_reg<=cnt_next;
+		clk_reg<=clk_next;
+	end
+end
+
+
+always @(clk_reg,en)
+begin
+	clk_next=clk_reg;
+        cnt_next=cnt_reg;
+	if(en)
+	begin
+		if(cnt_reg == perioada)
+		begin 
+			cnt_next=0;
+			clk_next=~(clk_reg);
+		end
+		else
+		begin
+			cnt_next=cnt_reg+1;
+		end
+	end
+end
+assign clk_div=clk_reg;
+
+endmodule
+
+ `define IDLE 3'b000
+`define START 3'b001
+`define STOP 3'b011
+`define RESET 3'b010
+`define MEM 3'b100
+
+
+module clk_mng #(parameter ADR_WIDTH=10)
+(
+	input clk,
+	input rst,
+	input [1:0]comanda,
+	output [7:0]timp_s,
+	output [7:0] timp_m,
+	output [ADR_WIDTH-1:0] adr_out
+);
+
+reg[7:0] contor_reg_s;
+reg[7:0] contor_next_s;
+reg [7:0] contor_reg_m;
+reg [7:0]  contor_next_m;
+reg[ADR_WIDTH-1:0] adr_reg, adr_next;
+reg [2:0] state_reg;
+reg [2:0] state_next;
+
+
+always @(posedge clk or negedge rst)
+begin
+	if(!rst)
+	begin
+		contor_reg_s<=0;
+		contor_reg_m<=0;
+		state_reg<=3'b000;
+		adr_reg<=0;
+	end
+	else
+	begin
+		contor_reg_s<=contor_next_s;
+		contor_reg_m<=contor_next_m;
+		state_reg<=state_next;
+		adr_reg<=adr_next;
+	end
+end
+
+always @(state_reg, contor_reg_s,contor_reg_m)
+begin
+	state_next=state_reg;
+	contor_next_s=contor_reg_s;
+	adr_next=adr_reg;
+	contor_next_m=contor_reg_m;
+	case(state_reg)
+	
+	`IDLE: begin
+		contor_next_s=0;
+		contor_next_m=0;
+		if(comanda==2'b01)
+			state_next=`START;
+		end
+
+	`START: begin
+		
+		//contor_next=contor_reg;
+		contor_next_s=contor_reg_s+1;
+		if(contor_reg_s==60) begin
+ 			contor_next_s=0;
+			contor_next_m=contor_reg_m+1;
+			
+			end							
+		if(comanda==2'b11)
+			state_next=`MEM;
+		if(comanda==2'b10)
+			state_next=`RESET;
+		if(comanda==2'b00)
+			state_next=`IDLE;
+		end
+
+	`MEM: begin
+		state_next=`STOP;
+		adr_next=adr_reg+1;
+		
+	      end
+	`STOP: begin
+		if(comanda==2'b01)
+			state_next=`START;
+		end
+
+	
+	
+	`RESET: begin
+		
+		if(comanda==2'b01)
+			state_next=`IDLE;
+		end
+		
+		//contor_next=contor_reg;
+	
+ 		//contor_next<=contor_reg+1;
+	endcase
+	
+end
+
+assign timp_s=contor_reg_s;
+assign timp_m=contor_reg_m;
+assign adr_out=adr_reg;
+
+endmodule
+
+project_new example1 -overwrite
+
+set_global_assignment -name FAMILY MAX10
+set_global_assignment -name DEVICE 10M50DAF484C7G 
+
+set_global_assignment -name BDF_FILE example1.bdf
+set_global_assignment -name VERILOG_FILE prog.v
+set_global_assignment -name VERILOG_FILE tm.v
+set_global_assignment -name VERILOG_FILE hex.v
+set_global_assignment -name VERILOG_FILE cronometru.v
+set_global_assignment -name VERILOG_FILE BCD.v
+set_global_assignment -name VERILOG_FILE bram.v
+
+set_global_assignment -name SDC_FILE example1.sdc
+
+#set_global_assignment -name TOP_LEVEL_ENTITY clk_div
+#set_global_assignment -name TOP_LEVEL_ENTITY clk_mng
+set_global_assignment -name TOP_LEVEL_ENTITY cronometru
+set_location_assignment -to clk PIN_AH10
+
+
+set_location_assignment PIN_B8 -to rst   ;# PUSH BUTTON[0]
+set_location_assignment PIN_C10  -to en  ;# SWITCH[1]
+#set_location_assignment PIN_A9  -to clk_div  ;# LEDR[1]
+#set_location_assignment PIN_A8  -to timp[0]  ;# LEDR[1]
+#set_location_assignment PIN_A9  -to timp[1]  ;# LEDR[1]
+#set_location_assignment PIN_A10  -to timp[2]  ;# LEDR[1]
+#set_location_assignment PIN_B10  -to timp[3]  ;# LEDR[1]
+#set_location_assignment PIN_D13  -to timp[4]  ;# LEDR[1]
+#set_location_assignment PIN_C13  -to timp[5]  ;# LEDR[1]
+#set_location_assignment PIN_E14  -to timp[6]  ;# LEDR[1]
+#set_location_assignment PIN_D14  -to timp[7]  ;# LEDR[1]
+set_location_assignment PIN_C11 -to comanda[0];
+set_location_assignment PIN_D12 -to comanda[1];
+
+
+
+set_location_assignment PIN_C14 -to hex_0[0];
+set_location_assignment PIN_E15 -to hex_0[1];
+set_location_assignment PIN_C15 -to hex_0[2];
+set_location_assignment PIN_C16 -to hex_0[3];
+set_location_assignment PIN_E16 -to hex_0[4];
+set_location_assignment PIN_D17 -to hex_0[5];
+set_location_assignment PIN_C17 -to hex_0[6];
+
+set_location_assignment PIN_C18 -to hex_1[0];
+set_location_assignment PIN_D18 -to hex_1[1];
+set_location_assignment PIN_E18 -to hex_1[2];
+set_location_assignment PIN_B16 -to hex_1[3];
+set_location_assignment PIN_A17 -to hex_1[4];
+set_location_assignment PIN_A18 -to hex_1[5];
+set_location_assignment PIN_B17 -to hex_1[6];
+
+set_location_assignment PIN_B20 -to hex_2[0];
+set_location_assignment PIN_A20 -to hex_2[1];
+set_location_assignment PIN_B19 -to hex_2[2];
+set_location_assignment PIN_A21 -to hex_2[3];
+set_location_assignment PIN_B21 -to hex_2[4];
+set_location_assignment PIN_C22 -to hex_2[5];
+set_location_assignment PIN_B22 -to hex_2[6];
+
+set_location_assignment PIN_F21 -to hex_3[0];
+set_location_assignment PIN_E22 -to hex_3[1];
+set_location_assignment PIN_E21 -to hex_3[2];
+set_location_assignment PIN_C19 -to hex_3[3];
+set_location_assignment PIN_C20 -to hex_3[4];
+set_location_assignment PIN_D19 -to hex_3[5];
+set_location_assignment PIN_E17 -to hex_3[6];
+
+#memorie
+set_location_assignment PIN_A8 -to led_0[0];
+set_location_assignment PIN_A9 -to led_0[1];
+set_location_assignment PIN_A10 -to led_0[2];
+set_location_assignment PIN_B10 -to led_0[3];
+set_location_assignment PIN_D13 -to led_0[4];
+set_location_assignment PIN_C13 -to led_0[5];
+set_location_assignment PIN_E14 -to led_0[6];
+set_location_assignment PIN_D14 -to led_0[7];
+set_location_assignment PIN_A11 -to led_0[8];
+
+set_location_assignment PIN_P11  -to clk  ;
+
+load_package flow
+execute_flow -compile
+
+project_close
